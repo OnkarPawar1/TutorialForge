@@ -1,25 +1,27 @@
 /**
  * video-processor.js — Extract frames using Canvas API.
  * 
- * KEY ARCHITECTURE: Uses Blobs instead of data URLs.
- * - canvas.toBlob() → Blob (browser-managed memory, NOT in JS heap)
- * - FrameStore manages Blob lifecycle + creates lightweight objectURLs
- * - JPEG at 92% quality: 1920×1080 = ~200KB per frame (vs ~6MB for PNG data URL)
- * - 360 frames (1hr @10s) = ~72MB total (vs 2.2GB with old approach)
+ * Uses PNG Blobs for LOSSLESS quality (critical for text-heavy content).
+ * Blob storage keeps images in browser-managed memory instead of JS heap
+ * to prevent "Aw, Snap!" crashes on long videos.
+ *
+ * PNG vs JPEG for code/text screenshots:
+ * - JPEG creates compression artifacts around sharp text edges → blurry text
+ * - PNG preserves every pixel perfectly → crystal clear text at any zoom
+ * - PNG Blob (~2MB) is stored efficiently by browser, not as 6MB base64 string
  */
 
 const VideoProcessor = {
   _video: null,
   _canvas: null,
   _ctx: null,
-  _frames: [], // [{ time, url (objectURL), width, height }]
+  _frames: [],
   _aborted: false,
 
   /**
    * Initialize with a video file
    */
   async loadVideo(file) {
-    // Cleanup previous
     FrameStore.cleanup();
     this._frames = [];
     this._aborted = false;
@@ -52,13 +54,9 @@ const VideoProcessor = {
 
   /**
    * Extract frames at the given interval.
-   * Captures at full native resolution, stores as JPEG Blobs.
-   * @param {number} interval - seconds between captures
-   * @param {number} quality - JPEG quality 0-1 (default 0.92)
-   * @param {number} maxWidth - max capture width (default: native)
-   * @param {function} onProgress - callback(percent, frameCount)
+   * ALWAYS captures as lossless PNG at full native resolution.
    */
-  async extractFrames(interval, quality = 0.95, maxWidth = 9999, onProgress = null) {
+  async extractFrames(interval, quality = 1.0, maxWidth = 9999, onProgress = null) {
     const video = this._video;
     const canvas = this._canvas;
 
@@ -66,14 +64,13 @@ const VideoProcessor = {
       throw new Error('No video loaded');
     }
 
-    // Cleanup any previous frames
     FrameStore.cleanup();
     this._frames = [];
     this._aborted = false;
     const duration = video.duration;
     const totalFrames = Math.floor(duration / interval) + 1;
 
-    // Use native resolution, capped at maxWidth for sanity
+    // Full native resolution — no downscaling
     let drawWidth = video.videoWidth;
     let drawHeight = video.videoHeight;
     if (drawWidth > maxWidth) {
@@ -91,7 +88,7 @@ const VideoProcessor = {
       if (time > duration) break;
 
       try {
-        const url = await this._captureFrame(time, drawWidth, drawHeight, quality);
+        const url = await this._captureFrame(time, drawWidth, drawHeight);
         this._frames.push({ time, url, width: drawWidth, height: drawHeight });
       } catch (e) {
         console.warn(`Failed to capture frame at ${time}s:`, e);
@@ -102,7 +99,7 @@ const VideoProcessor = {
         onProgress(percent, this._frames.length);
       }
 
-      // Yield to UI thread and allow GC
+      // Yield to UI thread
       await Utils.delay(50);
     }
 
@@ -110,10 +107,10 @@ const VideoProcessor = {
   },
 
   /**
-   * Capture a single frame as a JPEG Blob, store in FrameStore.
-   * Returns the objectURL for display.
+   * Capture a single frame as a LOSSLESS PNG Blob.
+   * PNG preserves every pixel — critical for readable text in code editors.
    */
-  _captureFrame(time, width, height, quality) {
+  _captureFrame(time, width, height) {
     return new Promise((resolve, reject) => {
       const video = this._video;
       const canvas = this._canvas;
@@ -122,19 +119,17 @@ const VideoProcessor = {
       const onSeeked = () => {
         video.removeEventListener('seeked', onSeeked);
         try {
-          // Draw at full resolution
           ctx.drawImage(video, 0, 0, width, height);
 
-          // Use toBlob() — stores image in browser memory, NOT as a giant string
+          // PNG — lossless, no compression artifacts, every pixel preserved
           canvas.toBlob((blob) => {
             if (!blob) {
               reject(new Error('Canvas toBlob returned null'));
               return;
             }
-            // Store in FrameStore and get lightweight objectURL
             const url = FrameStore.store(blob, width, height);
             resolve(url);
-          }, 'image/jpeg', quality);
+          }, 'image/png');
 
         } catch (e) {
           reject(e);
@@ -151,23 +146,14 @@ const VideoProcessor = {
     });
   },
 
-  /**
-   * Abort extraction
-   */
   abort() {
     this._aborted = true;
   },
 
-  /**
-   * Get extracted frames
-   */
   getFrames() {
     return this._frames;
   },
 
-  /**
-   * Get memory usage summary
-   */
   getMemoryInfo() {
     return {
       frameCount: this._frames.length,
@@ -176,9 +162,6 @@ const VideoProcessor = {
     };
   },
 
-  /**
-   * Cleanup
-   */
   cleanup() {
     if (this._video && this._video.src) {
       Utils.revokeObjectURL(this._video.src);
