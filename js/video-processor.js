@@ -58,7 +58,7 @@ const VideoProcessor = {
    * @param {number} maxWidth - max capture width (default: native)
    * @param {function} onProgress - callback(percent, frameCount)
    */
-  async extractFrames(interval, quality = 0.92, maxWidth = 9999, onProgress = null) {
+  async extractFrames(interval, quality = 0.95, maxWidth = 9999, onProgress = null) {
     const video = this._video;
     const canvas = this._canvas;
 
