@@ -1,7 +1,12 @@
 /**
  * exporter.js — Export document to PDF (jsPDF) or DOCX (docx.js)
- * Maximum HD image quality: full-width images, no re-compression, no height caps.
- * Supports single-file and multi-file split downloads.
+ *
+ * CRITICAL ARCHITECTURE for handling heavy/long videos:
+ * - Images are stored as Blobs in FrameStore (browser-managed memory)
+ * - During export, each image is converted to data URL ONE AT A TIME
+ * - After adding to PDF, the data URL string is released immediately
+ * - This keeps peak memory usage low even for 500+ frame documents
+ * - Supports single-file and multi-file split downloads
  */
 
 const Exporter = {
@@ -12,7 +17,7 @@ const Exporter = {
    */
   estimatePages(blocks, config) {
     const pageSize = config.pageSize === 'letter' ? { h: 279 } : { h: 297 };
-    const margin = 15;
+    const margin = 12;
     const usableH = pageSize.h - margin * 2;
     const bodySize = parseInt(config.fontSize) || 14;
     const lineH = bodySize * 0.3528 * (parseFloat(config.lineHeight) || 1.6);
@@ -25,7 +30,6 @@ const Exporter = {
     for (const block of blocks) {
       if (block.type === 'image') {
         imageCount++;
-        // Each image gets roughly 60% of page height
         const imgH = usableH * 0.6;
         if (y + imgH + 12 > usableH) { pages++; y = 0; }
         y += imgH + 12;
@@ -58,11 +62,56 @@ const Exporter = {
   },
 
   /**
-   * Export as PDF using jsPDF — MAXIMUM IMAGE QUALITY
-   * - Images span full page width with minimal margins
-   * - No aggressive height capping
-   * - PNG format preserved (no re-compression to JPEG)
-   * - No compression flag on addImage
+   * Resolve an image URL to a data URL for PDF embedding.
+   * If it's a blob: URL, reads the Blob one-at-a-time.
+   * If it's already a data: URL, returns as-is.
+   */
+  async _resolveImageForPDF(url) {
+    // If managed by FrameStore, convert blob → data URL
+    if (FrameStore.has(url)) {
+      return await FrameStore.toDataURL(url);
+    }
+    // If it's a blob URL not in FrameStore, fetch it
+    if (url.startsWith('blob:')) {
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        return await Utils.blobToDataURL(blob);
+      } catch (e) {
+        console.warn('Failed to fetch blob URL:', e);
+        return null;
+      }
+    }
+    // Already a data URL
+    return url;
+  },
+
+  /**
+   * Resolve an image URL to Uint8Array for DOCX embedding.
+   */
+  async _resolveImageForDOCX(url) {
+    if (FrameStore.has(url)) {
+      return await FrameStore.toUint8Array(url);
+    }
+    if (url.startsWith('blob:')) {
+      try {
+        const resp = await fetch(url);
+        const buf = await resp.arrayBuffer();
+        return new Uint8Array(buf);
+      } catch (e) {
+        console.warn('Failed to fetch blob URL for DOCX:', e);
+        return null;
+      }
+    }
+    if (url.startsWith('data:')) {
+      return Utils.dataURLtoUint8Array(url);
+    }
+    return null;
+  },
+
+  /**
+   * Export as PDF using jsPDF.
+   * Converts each image blob → data URL ONE AT A TIME to prevent memory blowup.
    */
   async exportPDF(blocks, config, onProgress) {
     await this._ensureJsPDF();
@@ -73,7 +122,6 @@ const Exporter = {
 
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    // Smaller margins = bigger images = more detail visible
     const margin = 12;
     const contentWidth = pageWidth - margin * 2;
     let y = margin;
@@ -108,39 +156,42 @@ const Exporter = {
     };
 
     const total = blocks.length;
+    let imgErrors = 0;
 
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
 
       if (block.type === 'image') {
         try {
-          const dims = await Utils.getImageDimensions(block.content);
+          // Resolve blob → data URL (ONE AT A TIME — critical for memory)
+          const dataURL = await this._resolveImageForPDF(block.content);
+          if (!dataURL) {
+            imgErrors++;
+            continue;
+          }
 
-          // Calculate image dimensions to fill FULL content width
+          // Get dimensions
+          const dims = await Utils.getImageDimensions(block.content);
           let imgWidth = contentWidth;
           let imgHeight = (dims.height / dims.width) * imgWidth;
 
-          // Allow images up to 75% of page height — much bigger than before
+          // Allow up to 75% of page height
           const maxImgHeight = pageHeight * 0.75;
           if (imgHeight > maxImgHeight) {
             imgHeight = maxImgHeight;
             imgWidth = (dims.width / dims.height) * imgHeight;
           }
 
-          // If image won't fit on current page, start a new page
           checkNewPage(imgHeight + 10);
 
-          // Center the image horizontally
           const xOffset = margin + (contentWidth - imgWidth) / 2;
+          const imgFormat = dataURL.includes('data:image/png') ? 'PNG' : 'JPEG';
 
-          // Detect image format from the data URL
-          const imgFormat = block.content.includes('data:image/png') ? 'PNG' : 'JPEG';
-
-          // Add image with NO compression — 'NONE' preserves original quality
-          doc.addImage(block.content, imgFormat, xOffset, y, imgWidth, imgHeight, undefined, 'NONE');
+          // Add image — use 'NONE' compression to preserve quality
+          doc.addImage(dataURL, imgFormat, xOffset, y, imgWidth, imgHeight, undefined, 'NONE');
           y += imgHeight + 3;
 
-          // Caption below image
+          // Caption
           if (block.caption) {
             doc.setFont(pdfFont, 'italic');
             doc.setFontSize(8);
@@ -148,8 +199,12 @@ const Exporter = {
             doc.text(block.caption, pageWidth / 2, y, { align: 'center' });
             y += 6;
           }
+
+          // dataURL goes out of scope here — GC can reclaim the string memory
+
         } catch (e) {
-          console.warn('Failed to add image to PDF:', e);
+          console.warn('Failed to add image to PDF at block', i, ':', e);
+          imgErrors++;
         }
       } else if (block.type === 'timestamp') {
         checkNewPage(10);
@@ -177,7 +232,13 @@ const Exporter = {
       if (onProgress) {
         onProgress(Math.round(((i + 1) / total) * 100));
       }
-      if (i % 3 === 0) await Utils.delay(10);
+
+      // Yield to UI thread every few blocks to keep browser responsive
+      if (i % 3 === 0) await Utils.delay(20);
+    }
+
+    if (imgErrors > 0) {
+      console.warn(`${imgErrors} images failed to embed in PDF`);
     }
 
     return doc;
@@ -206,8 +267,8 @@ const Exporter = {
   },
 
   /**
-   * Export as DOCX — MAXIMUM IMAGE QUALITY
-   * Uses full-page-width images (≈700px for A4 at 96dpi)
+   * Export as DOCX.
+   * Converts each image blob → Uint8Array ONE AT A TIME.
    */
   async exportDOCX(blocks, config, onProgress) {
     await this._ensureDocx();
@@ -223,9 +284,11 @@ const Exporter = {
 
       if (block.type === 'image') {
         try {
+          // Resolve blob → Uint8Array (one at a time)
+          const imgData = await this._resolveImageForDOCX(block.content);
+          if (!imgData) continue;
+
           const dims = await Utils.getImageDimensions(block.content);
-          // Full page width in DOCX is about 625px (A4 with 1-inch margins)
-          // Use the full width for maximum clarity
           const maxW = 625;
           let w = dims.width;
           let h = dims.height;
@@ -234,9 +297,6 @@ const Exporter = {
             w = maxW;
           }
 
-          const imgData = Utils.dataURLtoUint8Array(block.content);
-          const imgType = block.content.includes('data:image/png') ? 'png' : 'jpg';
-
           children.push(new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing: { before: 200, after: 100 },
@@ -244,7 +304,7 @@ const Exporter = {
               new ImageRun({
                 data: imgData,
                 transformation: { width: w, height: h },
-                type: imgType
+                type: 'jpg'
               })
             ]
           }));
@@ -259,7 +319,7 @@ const Exporter = {
             }));
           }
         } catch (e) {
-          console.warn('DOCX image error:', e);
+          console.warn('DOCX image error at block', i, ':', e);
         }
       } else if (block.type === 'timestamp') {
         children.push(new Paragraph({
@@ -278,7 +338,7 @@ const Exporter = {
       }
 
       if (onProgress) onProgress(Math.round(((i + 1) / total) * 100));
-      if (i % 10 === 0) await Utils.delay(5);
+      if (i % 5 === 0) await Utils.delay(10);
     }
 
     const docxDoc = new Document({
@@ -324,7 +384,7 @@ const Exporter = {
   },
 
   /**
-   * Dynamically load docx library from CDN
+   * Dynamically load docx library
    */
   _loadDocxLib() {
     return new Promise((resolve, reject) => {
@@ -336,7 +396,6 @@ const Exporter = {
       ];
 
       let loaded = false;
-
       const tryLoad = (idx) => {
         if (idx >= urls.length) {
           if (!loaded) reject(new Error('Failed to load docx library from any CDN'));
@@ -348,7 +407,6 @@ const Exporter = {
         script.onerror = () => tryLoad(idx + 1);
         document.head.appendChild(script);
       };
-
       tryLoad(0);
     });
   }

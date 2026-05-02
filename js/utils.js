@@ -1,5 +1,6 @@
 /**
  * utils.js — Utility helpers for TutorialForge
+ * Includes FrameStore for memory-efficient blob-based image storage.
  */
 
 const Utils = {
@@ -22,9 +23,7 @@ const Utils = {
    */
   parseTimestamp(str) {
     if (!str) return null;
-    // Remove brackets / parens
     let clean = str.replace(/[\[\]\(\)]/g, '').trim();
-    // Remove SRT milliseconds: 00:01:23,456 -> 00:01:23
     clean = clean.replace(/[,\.]\d+$/, '');
 
     const parts = clean.split(':').map(Number);
@@ -107,22 +106,31 @@ const Utils = {
   },
 
   /**
-   * Convert data URL to ArrayBuffer (for docx images)
+   * Convert a Blob to a base64 data URL (one at a time, for export)
    */
-  dataURLtoArrayBuffer(dataURL) {
-    const base64 = dataURL.split(',')[1];
-    const binary = atob(base64);
-    const len = binary.length;
-    const buffer = new ArrayBuffer(len);
-    const view = new Uint8Array(buffer);
-    for (let i = 0; i < len; i++) {
-      view[i] = binary.charCodeAt(i);
-    }
-    return buffer;
+  blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
   },
 
   /**
-   * Convert data URL to Uint8Array
+   * Convert a Blob to Uint8Array (for DOCX images)
+   */
+  blobToUint8Array(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(new Uint8Array(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(blob);
+    });
+  },
+
+  /**
+   * Convert data URL to Uint8Array (fallback for inline data URLs)
    */
   dataURLtoUint8Array(dataURL) {
     const base64 = dataURL.split(',')[1];
@@ -136,14 +144,120 @@ const Utils = {
   },
 
   /**
-   * Get image dimensions from a data URL
+   * Get image dimensions from any URL (blob: or data:)
    */
-  getImageDimensions(dataURL) {
+  getImageDimensions(url) {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-      img.onerror = () => resolve({ width: 640, height: 360 });
-      img.src = dataURL;
+      img.onerror = () => resolve({ width: 1920, height: 1080 });
+      img.src = url;
     });
+  }
+};
+
+
+/**
+ * FrameStore — Memory-efficient storage for video frames.
+ * Stores frames as Blobs (browser-managed, not in JS heap)
+ * and creates lightweight objectURLs for display.
+ *
+ * This is the KEY to handling 1-2+ hour videos without crashing.
+ * - A 1920×1080 JPEG at 92% = ~200KB as Blob (browser-managed memory)
+ * - A 1920×1080 PNG as data URL = ~6MB in JS heap string
+ * - For 360 frames: Blob approach = ~72MB vs data URL = ~2.2GB
+ */
+const FrameStore = {
+  _blobs: new Map(),    // objectURL → Blob
+  _dims: new Map(),     // objectURL → { width, height }
+
+  /**
+   * Store a Blob and return its objectURL
+   */
+  store(blob, width, height) {
+    const url = URL.createObjectURL(blob);
+    this._blobs.set(url, blob);
+    this._dims.set(url, { width, height });
+    return url;
+  },
+
+  /**
+   * Get the Blob for a given objectURL
+   */
+  getBlob(url) {
+    return this._blobs.get(url) || null;
+  },
+
+  /**
+   * Get stored dimensions
+   */
+  getDims(url) {
+    return this._dims.get(url) || { width: 1920, height: 1080 };
+  },
+
+  /**
+   * Convert a stored objectURL to data URL (for PDF export — one at a time)
+   */
+  async toDataURL(url) {
+    const blob = this._blobs.get(url);
+    if (!blob) {
+      // Already a data URL or external URL, return as-is
+      return url;
+    }
+    return await Utils.blobToDataURL(blob);
+  },
+
+  /**
+   * Convert a stored objectURL to Uint8Array (for DOCX export)
+   */
+  async toUint8Array(url) {
+    const blob = this._blobs.get(url);
+    if (!blob) {
+      // Fallback: might be a data URL
+      if (url.startsWith('data:')) {
+        return Utils.dataURLtoUint8Array(url);
+      }
+      // Fetch external URL
+      const resp = await fetch(url);
+      const buf = await resp.arrayBuffer();
+      return new Uint8Array(buf);
+    }
+    return await Utils.blobToUint8Array(blob);
+  },
+
+  /**
+   * Check if a URL is managed by FrameStore
+   */
+  has(url) {
+    return this._blobs.has(url);
+  },
+
+  /**
+   * Get total stored size estimate
+   */
+  getTotalSize() {
+    let total = 0;
+    for (const blob of this._blobs.values()) {
+      total += blob.size;
+    }
+    return total;
+  },
+
+  /**
+   * Get count
+   */
+  count() {
+    return this._blobs.size;
+  },
+
+  /**
+   * Cleanup all stored blobs
+   */
+  cleanup() {
+    for (const url of this._blobs.keys()) {
+      URL.revokeObjectURL(url);
+    }
+    this._blobs.clear();
+    this._dims.clear();
   }
 };

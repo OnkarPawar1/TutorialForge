@@ -1,5 +1,6 @@
 /**
- * editor.js — WYSIWYG editor controller for document preview & editing
+ * editor.js — WYSIWYG editor controller for document preview & editing.
+ * Uses objectURLs from FrameStore for display (lightweight, no memory bloat).
  */
 
 const Editor = {
@@ -13,7 +14,8 @@ const Editor = {
   },
 
   /**
-   * Render document blocks into the editor
+   * Render document blocks into the editor.
+   * Screenshot blocks now use objectURLs (blob: URLs) for display.
    */
   render(blocks, config = {}) {
     const el = this._contentEl;
@@ -36,8 +38,9 @@ const Editor = {
     for (const block of blocks) {
       if (block.type === 'screenshot') {
         const timeLabel = block.time !== null ? Utils.formatTime(block.time) : '';
-        html += `<div class="screenshot-block">`;
-        html += `<img src="${block.dataURL}" alt="Screenshot at ${timeLabel}" loading="lazy">`;
+        // Use the objectURL for display — lightweight, browser-managed
+        html += `<div class="screenshot-block" data-time="${block.time || ''}">`;
+        html += `<img src="${block.url}" alt="Screenshot at ${timeLabel}" loading="lazy">`;
         if (timeLabel) {
           html += `<div class="screenshot-caption">📸 ${timeLabel}</div>`;
         }
@@ -61,16 +64,8 @@ const Editor = {
   },
 
   /**
-   * Extract all images from the editor as data URLs
-   */
-  getImages() {
-    const imgs = this._contentEl.querySelectorAll('img');
-    return Array.from(imgs).map(img => img.src);
-  },
-
-  /**
-   * Get structured content from editor (for export)
-   * Returns array of { type: 'text'|'image', content: string }
+   * Get structured content from editor (for export).
+   * Images will have blob: URLs which the exporter resolves via FrameStore.
    */
   getStructuredContent() {
     const blocks = [];
@@ -83,8 +78,10 @@ const Editor = {
         if (img) {
           blocks.push({
             type: 'image',
-            content: img.src,
-            caption: caption ? caption.textContent : ''
+            content: img.src,  // blob: URL — resolved by exporter via FrameStore
+            caption: caption ? caption.textContent : '',
+            width: img.naturalWidth || 1920,
+            height: img.naturalHeight || 1080
           });
         }
       } else if (child.classList.contains('timestamp-marker')) {
@@ -96,10 +93,9 @@ const Editor = {
         if (text.trim()) {
           blocks.push({ type: 'text', content: text.trim() });
         }
-        // Check for images inside
         const imgs = child.querySelectorAll('img');
         imgs.forEach(img => {
-          blocks.push({ type: 'image', content: img.src, caption: '' });
+          blocks.push({ type: 'image', content: img.src, caption: '', width: img.naturalWidth || 1920, height: img.naturalHeight || 1080 });
         });
       }
     }
@@ -111,7 +107,6 @@ const Editor = {
    * Bind toolbar buttons
    */
   _bindToolbar() {
-    // Command buttons
     this._toolbarEl.querySelectorAll('.toolbar-btn[data-cmd]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -121,21 +116,15 @@ const Editor = {
       });
     });
 
-    // Heading select
     const headingSelect = document.getElementById('toolbarHeading');
     if (headingSelect) {
       headingSelect.addEventListener('change', () => {
         const val = headingSelect.value;
-        if (val === 'p') {
-          document.execCommand('formatBlock', false, 'p');
-        } else {
-          document.execCommand('formatBlock', false, val);
-        }
+        document.execCommand('formatBlock', false, val === 'p' ? 'p' : val);
         this._contentEl.focus();
       });
     }
 
-    // Font family
     const fontSelect = document.getElementById('toolbarFont');
     if (fontSelect) {
       fontSelect.addEventListener('change', () => {
@@ -144,7 +133,6 @@ const Editor = {
       });
     }
 
-    // Font size
     const sizeSelect = document.getElementById('toolbarFontSize');
     if (sizeSelect) {
       sizeSelect.addEventListener('change', () => {
@@ -153,7 +141,6 @@ const Editor = {
       });
     }
 
-    // Text color
     const colorInput = document.getElementById('toolbarColor');
     if (colorInput) {
       colorInput.addEventListener('input', () => {

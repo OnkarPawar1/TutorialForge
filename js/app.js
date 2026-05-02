@@ -1,5 +1,7 @@
 /**
  * app.js — Main application controller for TutorialForge
+ * Handles the 5-step wizard flow, state management, and all UI interactions.
+ * Uses blob-based FrameStore for memory-efficient handling of long videos.
  */
 
 (function () {
@@ -13,13 +15,12 @@
     videoDuration: 0,
     transcript: '',
     segments: [],
-    frames: [],
+    frames: [],       // [{ time, url (objectURL), width, height }]
     documentBlocks: [],
     exportFormat: 'pdf',
     estimatedPages: 0
   };
 
-  // ===== DOM REFS =====
   const $ = (id) => document.getElementById(id);
 
   // ===== STEP NAVIGATION =====
@@ -43,7 +44,6 @@
     const panel = $(`panel-${step}`);
     if (panel) panel.classList.add('active');
 
-    // When entering step 5, compute page estimates
     if (step === 5) {
       updatePageEstimate();
     }
@@ -70,7 +70,6 @@
     $('estImageCount').textContent = est.imageCount;
     $('estTextCount').textContent = est.textCount;
 
-    // Update split info
     updateSplitInfo();
   }
 
@@ -233,7 +232,7 @@
         interval = parseInt($('customInterval').value) || 10;
       }
       const quality = parseInt(qualityRange.value) / 100;
-      const maxWidth = parseInt($('maxImgWidth').value) || 1280;
+      const maxWidth = parseInt($('maxImgWidth').value) || 1920;
 
       extractBtn.disabled = true;
       extractBtn.innerHTML = '<div class="spinner" style="display:inline-block"></div> Extracting...';
@@ -250,22 +249,25 @@
           progressLabel.textContent = `Extracting frames... (${count} captured)`;
         });
 
+        // Show thumbnails using objectURLs (lightweight)
         if (state.frames.length > 0) {
           thumbStrip.style.display = 'flex';
           for (const frame of state.frames) {
             const div = document.createElement('div');
             div.className = 'thumbnail-item';
             div.innerHTML = `
-              <img src="${frame.dataURL}" alt="Frame at ${Utils.formatTime(frame.time)}">
+              <img src="${frame.url}" alt="Frame at ${Utils.formatTime(frame.time)}" loading="lazy">
               <span class="thumbnail-time">${Utils.formatTime(frame.time)}</span>
             `;
             thumbStrip.appendChild(div);
           }
         }
 
-        progressLabel.textContent = `✅ Done! ${state.frames.length} frames extracted.`;
+        // Memory info
+        const memInfo = VideoProcessor.getMemoryInfo();
+        progressLabel.textContent = `✅ Done! ${state.frames.length} frames extracted. (${memInfo.totalSizeFormatted} used)`;
         nextBtn.disabled = false;
-        Utils.showToast(`${state.frames.length} frames extracted successfully!`, 'success');
+        Utils.showToast(`${state.frames.length} frames extracted! Memory: ${memInfo.totalSizeFormatted}`, 'success');
 
       } catch (e) {
         Utils.showToast('Frame extraction failed: ' + e.message, 'error');
@@ -328,7 +330,6 @@
     pdfCard.addEventListener('click', () => selectFormat('pdf'));
     docxCard.addEventListener('click', () => selectFormat('docx'));
 
-    // Split mode toggle
     singleRadio.addEventListener('change', () => {
       splitOptions.style.display = 'none';
     });
@@ -355,30 +356,29 @@
       downloadBtn.innerHTML = '<div class="spinner" style="display:inline-block"></div> Generating...';
       progressContainer.classList.add('visible');
       progressFill.style.width = '0%';
+      progressLabel.textContent = 'Generating document...';
 
       try {
         if (state.exportFormat === 'pdf') {
           if (isSplit) {
-            // Split PDF download
             const docs = await Exporter.exportPDFSplit(blocks, config, splitCount, (p) => {
               progressFill.style.width = p + '%';
               progressPercent.textContent = p + '%';
               progressLabel.textContent = `Generating split PDFs... ${p}%`;
             });
 
-            // Download each part
             for (let i = 0; i < docs.length; i++) {
               docs[i].save(`${filename}_part${i + 1}_of_${docs.length}.pdf`);
-              await Utils.delay(500); // browser needs time between downloads
+              await Utils.delay(800);
             }
 
             progressLabel.textContent = `✅ ${docs.length} PDF files generated!`;
             Utils.showToast(`${docs.length} PDF files downloaded!`, 'success');
           } else {
-            // Single PDF
             const doc = await Exporter.exportPDF(blocks, config, (p) => {
               progressFill.style.width = p + '%';
               progressPercent.textContent = p + '%';
+              progressLabel.textContent = `Generating PDF... ${p}%`;
             });
             doc.save(filename + '.pdf');
             progressLabel.textContent = `✅ PDF generated! (${doc.internal.getNumberOfPages()} pages)`;
@@ -386,7 +386,6 @@
           }
         } else {
           if (isSplit) {
-            // Split DOCX download
             const blobs = await Exporter.exportDOCXSplit(blocks, config, splitCount, (p) => {
               progressFill.style.width = p + '%';
               progressPercent.textContent = p + '%';
@@ -395,16 +394,16 @@
 
             for (let i = 0; i < blobs.length; i++) {
               saveAs(blobs[i], `${filename}_part${i + 1}_of_${blobs.length}.docx`);
-              await Utils.delay(500);
+              await Utils.delay(800);
             }
 
             progressLabel.textContent = `✅ ${blobs.length} DOCX files generated!`;
             Utils.showToast(`${blobs.length} DOCX files downloaded!`, 'success');
           } else {
-            // Single DOCX
             const blob = await Exporter.exportDOCX(blocks, config, (p) => {
               progressFill.style.width = p + '%';
               progressPercent.textContent = p + '%';
+              progressLabel.textContent = `Generating DOCX... ${p}%`;
             });
             saveAs(blob, filename + '.docx');
             progressLabel.textContent = '✅ DOCX generated!';
@@ -412,9 +411,14 @@
           }
         }
       } catch (e) {
+        console.error('Export error:', e);
         Utils.showToast('Export failed: ' + e.message, 'error');
         progressLabel.textContent = '❌ Export failed: ' + e.message;
-        console.error(e);
+
+        // If single-file export failed, suggest splitting
+        if (!isSplit) {
+          Utils.showToast('💡 Tip: Try splitting into multiple files for long documents', 'info');
+        }
       }
 
       downloadBtn.disabled = false;
