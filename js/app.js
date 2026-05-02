@@ -234,9 +234,36 @@
       const quality = parseInt(qualityRange.value) / 100;
       const maxWidth = parseInt($('maxImgWidth').value) || 1920;
 
+      // ===== PRE-EXTRACTION MEMORY CHECK =====
+      const estFrames = Math.floor(state.videoDuration / interval) + 1;
+      const avgPngSizeMB = 2.5; // ~2.5MB per 1920x1080 PNG blob
+      const estMemoryMB = Math.round(estFrames * avgPngSizeMB);
+      const estMemoryStr = estMemoryMB > 1024 
+        ? (estMemoryMB / 1024).toFixed(1) + ' GB' 
+        : estMemoryMB + ' MB';
+
+      // Warn if heavy workload
+      if (estMemoryMB > 800) {
+        const suggestedInterval = Math.ceil(state.videoDuration / (800 / avgPngSizeMB));
+        const proceed = confirm(
+          `⚠️ Heavy Workload Warning\n\n` +
+          `• Estimated frames: ${estFrames}\n` +
+          `• Estimated memory: ~${estMemoryStr}\n` +
+          `• Video duration: ${Utils.formatTime(state.videoDuration)}\n\n` +
+          `This may slow down your browser.\n\n` +
+          `💡 Suggestion: Use a ${suggestedInterval}s+ interval for this video length.\n\n` +
+          `Continue anyway?`
+        );
+        if (!proceed) return;
+      } else if (estFrames > 100) {
+        // Mild info for moderate workloads
+        Utils.showToast(`📊 Will extract ~${estFrames} frames (~${estMemoryStr} memory)`, 'info');
+      }
+
       extractBtn.disabled = true;
       extractBtn.innerHTML = '<div class="spinner" style="display:inline-block"></div> Extracting...';
       progressContainer.classList.add('visible');
+      progressLabel.textContent = `Preparing to extract ~${estFrames} frames...`;
       thumbStrip.style.display = 'none';
       thumbStrip.innerHTML = '';
 
@@ -246,7 +273,8 @@
         state.frames = await VideoProcessor.extractFrames(interval, quality, maxWidth, (percent, count) => {
           progressFill.style.width = percent + '%';
           progressPercent.textContent = percent + '%';
-          progressLabel.textContent = `Extracting frames... (${count} captured)`;
+          const memUsed = Utils.formatFileSize(FrameStore.getTotalSize());
+          progressLabel.textContent = `Extracting frames... (${count}/${estFrames} captured • ${memUsed})`;
         });
 
         // Show thumbnails using objectURLs (lightweight)
@@ -265,7 +293,7 @@
 
         // Memory info
         const memInfo = VideoProcessor.getMemoryInfo();
-        progressLabel.textContent = `✅ Done! ${state.frames.length} frames extracted. (${memInfo.totalSizeFormatted} used)`;
+        progressLabel.textContent = `✅ Done! ${state.frames.length} frames extracted. (${memInfo.totalSizeFormatted} memory used)`;
         nextBtn.disabled = false;
         Utils.showToast(`${state.frames.length} frames extracted! Memory: ${memInfo.totalSizeFormatted}`, 'success');
 
