@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Convert video tutorials into beautifully formatted PDF and DOCX documents with automatic screenshots and transcript integration.">
+  <title>TutorialForge — Video Tutorial to PDF/DOCX Converter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<div class="app-container">
+  <!-- Header -->
+  <header class="app-header">
+    <div class="app-logo">
+      <div class="app-logo-icon">🎬</div>
+      <h1 class="app-title">TutorialForge</h1>
+    </div>
+    <p class="app-subtitle">Transform video tutorials into beautifully formatted documents</p>
+  </header>
+
+  <!-- Stepper -->
+  <nav class="stepper" id="stepper">
+    <div class="step-item active" data-step="1">
+      <div class="step-number">1</div>
+      <span class="step-label">Upload Video</span>
+    </div>
+    <div class="step-connector" id="conn-1-2"></div>
+    <div class="step-item" data-step="2">
+      <div class="step-number">2</div>
+      <span class="step-label">Transcript</span>
+    </div>
+    <div class="step-connector" id="conn-2-3"></div>
+    <div class="step-item" data-step="3">
+      <div class="step-number">3</div>
+      <span class="step-label">Configure</span>
+    </div>
+    <div class="step-connector" id="conn-3-4"></div>
+    <div class="step-item" data-step="4">
+      <div class="step-number">4</div>
+      <span class="step-label">Edit</span>
+    </div>
+    <div class="step-connector" id="conn-4-5"></div>
+    <div class="step-item" data-step="5">
+      <div class="step-number">5</div>
+      <span class="step-label">Export</span>
+    </div>
+  </nav>
+
+  <!-- STEP 1: Upload Video -->
+  <section class="step-panel active" id="panel-1">
+    <div class="glass-card">
+      <h2 class="card-title">📹 Upload Your Video Tutorial</h2>
+      <p class="card-desc">Drag and drop your video file or click to browse. Supports MP4, WebM, and other formats.</p>
+      <div class="drop-zone" id="videoDropZone">
+        <input type="file" id="videoFileInput" accept="video/*">
+        <span class="drop-zone-icon">🎥</span>
+        <p class="drop-zone-text">Drop your video here or click to browse</p>
+        <p class="drop-zone-hint">MP4, WebM, MKV • Up to 4GB</p>
+      </div>
+      <div class="video-info" id="videoInfo">
+        <video class="video-preview" id="videoPreview" muted></video>
+        <div class="video-meta">
+          <h4 id="videoName">video.mp4</h4>
+          <p id="videoSize">0 MB</p>
+          <p id="videoDuration">Duration: --:--</p>
+        </div>
+        <button class="video-remove-btn" id="videoRemoveBtn">✕ Remove</button>
+      </div>
+      <div class="btn-group" style="justify-content:flex-end">
+        <button class="btn btn-primary" id="toStep2Btn" disabled>Next: Add Transcript →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2: Transcript -->
+  <section class="step-panel" id="panel-2">
+    <div class="glass-card">
+      <h2 class="card-title">📝 Add Transcript</h2>
+      <p class="card-desc">Paste the full transcript below. Timestamps like <code>0:15</code>, <code>[7:52]</code>, or SRT format are auto-detected.</p>
+      <textarea class="transcript-input" id="transcriptInput" placeholder="Paste your transcript here...&#10;&#10;Supported formats:&#10;0:15&#10;So yesterday we did some very important things...&#10;&#10;or&#10;&#10;[7:52] my video is now ready. You can watch it."></textarea>
+      <div class="transcript-file-upload">
+        <button class="btn btn-secondary btn-sm" id="transcriptFileBtn">📁 Upload .txt / .srt file</button>
+        <input type="file" id="transcriptFileInput" accept=".txt,.srt,.vtt" style="display:none">
+        <button class="btn btn-ghost btn-sm" id="clearTranscriptBtn">Clear</button>
+      </div>
+      <div class="transcript-stats" id="transcriptStats" style="display:none">
+        <span>📊 Words: <strong id="wordCount">0</strong></span>
+        <span>⏱️ Timestamps: <strong id="timestampCount">0</strong></span>
+        <span>📄 Segments: <strong id="segmentCount">0</strong></span>
+      </div>
+      <div class="btn-group" style="justify-content:space-between">
+        <button class="btn btn-ghost" id="backToStep1">← Back</button>
+        <button class="btn btn-primary" id="toStep3Btn" disabled>Next: Configure →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 3: Configure & Extract -->
+  <section class="step-panel" id="panel-3">
+    <div class="glass-card">
+      <h2 class="card-title">⚙️ Configuration & Frame Extraction</h2>
+      <p class="card-desc">Customize screenshot intervals, fonts, and layout before extracting frames.</p>
+      <div class="config-grid">
+        <!-- Screenshot Settings -->
+        <div class="config-section">
+          <h3>📸 Screenshot Settings</h3>
+          <div class="config-row">
+            <span class="config-label">Capture Interval</span>
+            <select id="captureInterval">
+              <option value="5">Every 5 sec</option>
+              <option value="10" selected>Every 10 sec</option>
+              <option value="15">Every 15 sec</option>
+              <option value="30">Every 30 sec</option>
+              <option value="60">Every 60 sec</option>
+              <option value="custom">Custom...</option>
+            </select>
+          </div>
+          <div class="config-row" id="customIntervalRow" style="display:none">
+            <span class="config-label">Custom (seconds)</span>
+            <input type="number" id="customInterval" min="1" max="600" value="20" style="width:80px">
+          </div>
+          <div class="config-row">
+            <span class="config-label">Image Quality</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="range" id="imageQuality" min="30" max="100" value="95">
+              <span id="qualityValue" style="font-size:13px;color:var(--text-secondary);min-width:35px">95%</span>
+            </div>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Max Width (px)</span>
+            <input type="number" id="maxImgWidth" min="200" max="3840" value="1280" style="width:80px">
+          </div>
+          <div class="config-row">
+            <span class="config-label">Screenshot Placement</span>
+            <select id="screenshotPlacement">
+              <option value="above">Above text</option>
+              <option value="below">Below text</option>
+            </select>
+          </div>
+        </div>
+        <!-- Typography & Layout -->
+        <div class="config-section">
+          <h3>🔤 Typography & Layout</h3>
+          <div class="config-row">
+            <span class="config-label">Font Family</span>
+            <select id="fontFamily">
+              <option value="Inter">Inter</option>
+              <option value="Roboto">Roboto</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Arial">Arial</option>
+              <option value="Courier New">Courier New</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Font Size</span>
+            <select id="fontSize">
+              <option value="12">12px</option>
+              <option value="14" selected>14px</option>
+              <option value="15">15px</option>
+              <option value="16">16px</option>
+              <option value="18">18px</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Line Height</span>
+            <select id="lineHeight">
+              <option value="1.4">1.4</option>
+              <option value="1.6" selected>1.6</option>
+              <option value="1.8">1.8</option>
+              <option value="2.0">2.0</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Page Size</span>
+            <select id="pageSize">
+              <option value="a4" selected>A4</option>
+              <option value="letter">Letter</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Document Theme</span>
+            <select id="docTheme">
+              <option value="light" selected>Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Extract Button & Progress -->
+      <div class="btn-group" style="justify-content:center;margin-top:32px">
+        <button class="btn btn-primary" id="extractBtn" style="padding:14px 40px;font-size:16px">
+          🎬 Extract Frames & Build Document
+        </button>
+      </div>
+
+      <div class="progress-container" id="extractProgress">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-text">
+          <span id="progressLabel">Extracting frames...</span>
+          <span id="progressPercent">0%</span>
+        </div>
+      </div>
+
+      <!-- Thumbnails -->
+      <div class="thumbnail-strip" id="thumbnailStrip" style="display:none"></div>
+
+      <div class="btn-group" style="justify-content:space-between">
+        <button class="btn btn-ghost" id="backToStep2">← Back</button>
+        <button class="btn btn-primary" id="toStep4Btn" disabled>Next: Edit Document →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 4: Editor -->
+  <section class="step-panel" id="panel-4">
+    <div class="glass-card" style="padding:20px">
+      <div class="editor-container">
+        <div class="editor-toolbar" id="editorToolbar">
+          <button class="toolbar-btn" data-cmd="bold" title="Bold"><b>B</b></button>
+          <button class="toolbar-btn" data-cmd="italic" title="Italic"><i>I</i></button>
+          <button class="toolbar-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+          <button class="toolbar-btn" data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+          <div class="toolbar-divider"></div>
+          <select class="toolbar-select" id="toolbarHeading" title="Heading">
+            <option value="p">Normal</option>
+            <option value="h1">Heading 1</option>
+            <option value="h2">Heading 2</option>
+            <option value="h3">Heading 3</option>
+          </select>
+          <div class="toolbar-divider"></div>
+          <button class="toolbar-btn" data-cmd="justifyLeft" title="Align Left">⫷</button>
+          <button class="toolbar-btn" data-cmd="justifyCenter" title="Align Center">⫿</button>
+          <button class="toolbar-btn" data-cmd="justifyRight" title="Align Right">⫸</button>
+          <div class="toolbar-divider"></div>
+          <select class="toolbar-select" id="toolbarFont" title="Font Family">
+            <option value="Inter">Inter</option>
+            <option value="Roboto">Roboto</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Arial">Arial</option>
+            <option value="Courier New">Courier New</option>
+          </select>
+          <select class="toolbar-select" id="toolbarFontSize" title="Font Size">
+            <option value="1">Small</option>
+            <option value="3" selected>Normal</option>
+            <option value="5">Large</option>
+            <option value="7">Huge</option>
+          </select>
+          <div class="toolbar-divider"></div>
+          <input type="color" class="toolbar-btn" id="toolbarColor" value="#1a1a2e" title="Text Color" style="padding:2px;width:34px;height:34px;border:1px solid var(--border-color);border-radius:var(--radius-sm);">
+          <div class="toolbar-divider"></div>
+          <button class="toolbar-btn" data-cmd="undo" title="Undo">↩</button>
+          <button class="toolbar-btn" data-cmd="redo" title="Redo">↪</button>
+        </div>
+        <div class="editor-content" id="editorContent" contenteditable="true">
+          <p style="color:#888;text-align:center;">Your document will appear here after extraction...</p>
+        </div>
+      </div>
+      <div class="btn-group" style="justify-content:space-between;margin-top:16px">
+        <button class="btn btn-ghost" id="backToStep3">← Back to Config</button>
+        <button class="btn btn-primary" id="toStep5Btn">Next: Export →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 5: Export -->
+  <section class="step-panel" id="panel-5">
+    <div class="glass-card">
+      <h2 class="card-title">📦 Export Your Document</h2>
+      <p class="card-desc">Choose your preferred format and download.</p>
+
+      <!-- Page estimation -->
+      <div class="export-estimate" id="exportEstimate" style="display:flex;gap:20px;padding:16px 20px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);margin-bottom:20px;flex-wrap:wrap">
+        <span style="font-size:14px;color:var(--text-secondary)">📄 Estimated pages: <strong id="estPageCount" style="color:var(--text-primary)">--</strong></span>
+        <span style="font-size:14px;color:var(--text-secondary)">🖼️ Images: <strong id="estImageCount" style="color:var(--text-primary)">--</strong></span>
+        <span style="font-size:14px;color:var(--text-secondary)">📝 Text blocks: <strong id="estTextCount" style="color:var(--text-primary)">--</strong></span>
+      </div>
+
+      <div class="export-options">
+        <div class="export-card selected" data-format="pdf" id="exportPdfCard">
+          <div class="export-card-icon">📕</div>
+          <div class="export-card-title">PDF Document</div>
+          <div class="export-card-desc">Best for sharing and printing</div>
+        </div>
+        <div class="export-card" data-format="docx" id="exportDocxCard">
+          <div class="export-card-icon">📘</div>
+          <div class="export-card-title">DOCX Document</div>
+          <div class="export-card-desc">Editable in Word / Google Docs</div>
+        </div>
+      </div>
+      <div class="export-filename">
+        <label style="font-size:14px;font-weight:500;white-space:nowrap;">File name:</label>
+        <input type="text" id="exportFilename" value="tutorial-document" placeholder="Enter filename">
+        <span id="exportExt">.pdf</span>
+      </div>
+
+      <!-- Split download option -->
+      <div style="padding:16px 20px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+          <span style="font-size:14px;font-weight:500">📂 Download Mode</span>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border:1px solid var(--border-color);border-radius:var(--radius-sm);font-size:13px;transition:0.2s" id="singleFileLabel">
+            <input type="radio" name="downloadMode" value="single" checked id="downloadModeSingle" style="accent-color:var(--accent-violet)"> Single File
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border:1px solid var(--border-color);border-radius:var(--radius-sm);font-size:13px;transition:0.2s" id="splitFileLabel">
+            <input type="radio" name="downloadMode" value="split" id="downloadModeSplit" style="accent-color:var(--accent-violet)"> Split into multiple files
+          </label>
+        </div>
+        <div id="splitOptions" style="display:none;margin-top:12px;display:none">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:13px;color:var(--text-secondary)">Split into</span>
+            <input type="number" id="splitCount" min="2" max="50" value="2" style="width:70px">
+            <span style="font-size:13px;color:var(--text-secondary)">files</span>
+            <span style="font-size:12px;color:var(--text-muted)" id="splitInfo">(~-- pages each)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="progress-container" id="exportProgress">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="exportProgressFill"></div>
+        </div>
+        <div class="progress-text">
+          <span id="exportProgressLabel">Generating document...</span>
+          <span id="exportProgressPercent">0%</span>
+        </div>
+      </div>
+      <div class="btn-group" style="justify-content:space-between">
+        <button class="btn btn-ghost" id="backToStep4">← Back to Editor</button>
+        <button class="btn btn-primary" id="downloadBtn" style="padding:14px 40px;font-size:16px">
+          ⬇️ Download
+        </button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Hidden video element for frame extraction -->
+<video id="hiddenVideo" style="display:none" preload="auto" crossorigin="anonymous"></video>
+<canvas id="hiddenCanvas" style="display:none"></canvas>
+
+<!-- External Libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<!-- App Modules -->
+<script src="js/utils.js"></script>
+<script src="js/transcript-parser.js"></script>
+<script src="js/video-processor.js"></script>
+<script src="js/document-builder.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/exporter.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
