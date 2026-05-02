@@ -1,19 +1,18 @@
 /**
  * exporter.js — Export document to PDF (jsPDF) or DOCX (docx.js)
- * Supports single-file and multi-file split downloads
+ * Maximum HD image quality: full-width images, no re-compression, no height caps.
+ * Supports single-file and multi-file split downloads.
  */
 
 const Exporter = {
   _selectedFormat: 'pdf',
-  _jspdfLoaded: false,
-  _docxLoaded: false,
 
   /**
    * Estimate page count for the given blocks
    */
   estimatePages(blocks, config) {
-    const pageSize = config.pageSize === 'letter' ? { h: 279 } : { h: 297 }; // mm
-    const margin = 20;
+    const pageSize = config.pageSize === 'letter' ? { h: 279 } : { h: 297 };
+    const margin = 15;
     const usableH = pageSize.h - margin * 2;
     const bodySize = parseInt(config.fontSize) || 14;
     const lineH = bodySize * 0.3528 * (parseFloat(config.lineHeight) || 1.6);
@@ -26,7 +25,8 @@ const Exporter = {
     for (const block of blocks) {
       if (block.type === 'image') {
         imageCount++;
-        const imgH = usableH * 0.35; // estimate
+        // Each image gets roughly 60% of page height
+        const imgH = usableH * 0.6;
         if (y + imgH + 12 > usableH) { pages++; y = 0; }
         y += imgH + 12;
       } else if (block.type === 'timestamp') {
@@ -50,7 +50,6 @@ const Exporter = {
    */
   async _ensureJsPDF() {
     if (window.jspdf && window.jspdf.jsPDF) return;
-    // Try waiting a moment for CDN script to execute
     for (let i = 0; i < 10; i++) {
       await Utils.delay(200);
       if (window.jspdf && window.jspdf.jsPDF) return;
@@ -59,7 +58,11 @@ const Exporter = {
   },
 
   /**
-   * Export as PDF using jsPDF — returns jsPDF doc instance
+   * Export as PDF using jsPDF — MAXIMUM IMAGE QUALITY
+   * - Images span full page width with minimal margins
+   * - No aggressive height capping
+   * - PNG format preserved (no re-compression to JPEG)
+   * - No compression flag on addImage
    */
   async exportPDF(blocks, config, onProgress) {
     await this._ensureJsPDF();
@@ -70,7 +73,8 @@ const Exporter = {
 
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 20;
+    // Smaller margins = bigger images = more detail visible
+    const margin = 12;
     const contentWidth = pageWidth - margin * 2;
     let y = margin;
 
@@ -111,30 +115,38 @@ const Exporter = {
       if (block.type === 'image') {
         try {
           const dims = await Utils.getImageDimensions(block.content);
+
+          // Calculate image dimensions to fill FULL content width
           let imgWidth = contentWidth;
           let imgHeight = (dims.height / dims.width) * imgWidth;
 
-          // Cap at 45% of page height for better layout with HD images
-          if (imgHeight > pageHeight * 0.45) {
-            imgHeight = pageHeight * 0.45;
+          // Allow images up to 75% of page height — much bigger than before
+          const maxImgHeight = pageHeight * 0.75;
+          if (imgHeight > maxImgHeight) {
+            imgHeight = maxImgHeight;
             imgWidth = (dims.width / dims.height) * imgHeight;
           }
 
-          checkNewPage(imgHeight + 12);
+          // If image won't fit on current page, start a new page
+          checkNewPage(imgHeight + 10);
 
+          // Center the image horizontally
           const xOffset = margin + (contentWidth - imgWidth) / 2;
 
-          // Use PNG for sharper quality in the PDF
-          const imgFormat = block.content.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-          doc.addImage(block.content, imgFormat, xOffset, y, imgWidth, imgHeight, undefined, 'FAST');
-          y += imgHeight + 4;
+          // Detect image format from the data URL
+          const imgFormat = block.content.includes('data:image/png') ? 'PNG' : 'JPEG';
 
+          // Add image with NO compression — 'NONE' preserves original quality
+          doc.addImage(block.content, imgFormat, xOffset, y, imgWidth, imgHeight, undefined, 'NONE');
+          y += imgHeight + 3;
+
+          // Caption below image
           if (block.caption) {
             doc.setFont(pdfFont, 'italic');
-            doc.setFontSize(9);
+            doc.setFontSize(8);
             doc.setTextColor(150, 150, 170);
             doc.text(block.caption, pageWidth / 2, y, { align: 'center' });
-            y += 8;
+            y += 6;
           }
         } catch (e) {
           console.warn('Failed to add image to PDF:', e);
@@ -159,20 +171,20 @@ const Exporter = {
           doc.text(line, margin, y);
           y += lineH;
         }
-        y += 4;
+        y += 3;
       }
 
       if (onProgress) {
         onProgress(Math.round(((i + 1) / total) * 100));
       }
-      if (i % 5 === 0) await Utils.delay(10);
+      if (i % 3 === 0) await Utils.delay(10);
     }
 
     return doc;
   },
 
   /**
-   * Export as PDF — split into N files, returns array of jsPDF docs
+   * Export as PDF — split into N files
    */
   async exportPDFSplit(blocks, config, splitCount, onProgress) {
     const chunkSize = Math.ceil(blocks.length / splitCount);
@@ -182,7 +194,6 @@ const Exporter = {
       const start = part * chunkSize;
       const end = Math.min(start + chunkSize, blocks.length);
       const chunk = blocks.slice(start, end);
-
       if (chunk.length === 0) break;
 
       const doc = await this.exportPDF(chunk, config, (p) => {
@@ -195,7 +206,8 @@ const Exporter = {
   },
 
   /**
-   * Export as DOCX using docx library
+   * Export as DOCX — MAXIMUM IMAGE QUALITY
+   * Uses full-page-width images (≈700px for A4 at 96dpi)
    */
   async exportDOCX(blocks, config, onProgress) {
     await this._ensureDocx();
@@ -212,7 +224,9 @@ const Exporter = {
       if (block.type === 'image') {
         try {
           const dims = await Utils.getImageDimensions(block.content);
-          const maxW = 600;
+          // Full page width in DOCX is about 625px (A4 with 1-inch margins)
+          // Use the full width for maximum clarity
+          const maxW = 625;
           let w = dims.width;
           let h = dims.height;
           if (w > maxW) {
@@ -221,6 +235,7 @@ const Exporter = {
           }
 
           const imgData = Utils.dataURLtoUint8Array(block.content);
+          const imgType = block.content.includes('data:image/png') ? 'png' : 'jpg';
 
           children.push(new Paragraph({
             alignment: AlignmentType.CENTER,
@@ -229,7 +244,7 @@ const Exporter = {
               new ImageRun({
                 data: imgData,
                 transformation: { width: w, height: h },
-                type: 'jpg'
+                type: imgType
               })
             ]
           }));
@@ -300,9 +315,7 @@ const Exporter = {
    */
   async _ensureDocx() {
     if (window.docx) return;
-    // Try loading dynamically
     await this._loadDocxLib();
-    // Wait and verify
     for (let i = 0; i < 15; i++) {
       await Utils.delay(300);
       if (window.docx) return;
@@ -317,7 +330,6 @@ const Exporter = {
     return new Promise((resolve, reject) => {
       if (window.docx) return resolve();
 
-      // Try multiple CDN sources
       const urls = [
         'https://unpkg.com/docx@8.5.0/build/index.umd.js',
         'https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js'
@@ -332,10 +344,7 @@ const Exporter = {
         }
         const script = document.createElement('script');
         script.src = urls[idx];
-        script.onload = () => {
-          loaded = true;
-          resolve();
-        };
+        script.onload = () => { loaded = true; resolve(); };
         script.onerror = () => tryLoad(idx + 1);
         document.head.appendChild(script);
       };
