@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Convert video tutorials in bulk into beautifully formatted PDF and DOCX documents with automatic screenshots and transcript integration.">
+  <title>TutorialForge — Bulk Video Tutorial to PDF/DOCX Converter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<div class="app-container">
+  <!-- Header -->
+  <header class="app-header">
+    <div class="app-logo">
+      <div class="app-logo-icon">🎬</div>
+      <h1 class="app-title">TutorialForge</h1>
+    </div>
+    <p class="app-subtitle">Transform multiple video tutorials into beautifully formatted documents at once</p>
+  </header>
+
+  <!-- Unified Dashboard Layout -->
+  <div class="dashboard-grid">
+    
+    <!-- Column 1: Bulk Uploader & Global Settings -->
+    <aside class="dashboard-sidebar glass-card">
+      <h2 class="sidebar-title">📥 Upload Media & Subtitles</h2>
+      
+      <div class="drop-zone" id="bulkDropZone">
+        <input type="file" id="bulkFileInput" multiple accept="video/*,.srt,.vtt,.txt">
+        <span class="drop-zone-icon">🎥</span>
+        <p class="drop-zone-text">Drop multiple files or browse</p>
+        <p class="drop-zone-hint">Supports MP4, WebM, SRT, TXT, VTT • Match by filename</p>
+      </div>
+
+      <div class="config-sections">
+        <!-- Screenshot Settings -->
+        <div class="config-section">
+          <h3>📸 Global Screenshot Settings</h3>
+          <div class="config-row">
+            <span class="config-label">Capture Interval</span>
+            <select id="captureInterval">
+              <option value="5">Every 5 sec</option>
+              <option value="10" selected>Every 10 sec</option>
+              <option value="15">Every 15 sec</option>
+              <option value="30">Every 30 sec</option>
+              <option value="60">Every 60 sec</option>
+              <option value="custom">Custom...</option>
+            </select>
+          </div>
+          <div class="config-row" id="customIntervalRow" style="display:none">
+            <span class="config-label">Custom (seconds)</span>
+            <input type="number" id="customInterval" min="1" max="600" value="20" style="width:80px">
+          </div>
+          <div class="config-row">
+            <span class="config-label">Image Quality</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="range" id="imageQuality" min="30" max="100" value="95">
+              <span id="qualityValue" style="font-size:13px;color:var(--text-secondary);min-width:35px">95%</span>
+            </div>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Max Width (px)</span>
+            <input type="number" id="maxImgWidth" min="200" max="3840" value="1280" style="width:80px">
+          </div>
+          <div class="config-row">
+            <span class="config-label">Placement</span>
+            <select id="screenshotPlacement">
+              <option value="above">Above text</option>
+              <option value="below">Below text</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Conversation / Subtitle Settings -->
+        <div class="config-section">
+          <h3>🗣️ Conversation Splitting</h3>
+          <div class="config-row">
+            <span class="config-label">Split by Speakers</span>
+            <label class="switch">
+              <input type="checkbox" id="splitSpeakers" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Pause Detection Gap (s)</span>
+            <input type="number" id="gapThreshold" min="0" max="3600" value="30" style="width:80px">
+          </div>
+          <div class="config-row">
+            <span class="config-label">Subtitle Offset (s)</span>
+            <input type="number" id="timeOffset" step="0.5" value="0" style="width:80px">
+          </div>
+        </div>
+
+        <!-- Typography & Layout -->
+        <div class="config-section">
+          <h3>🔤 Typography & Page Style</h3>
+          <div class="config-row">
+            <span class="config-label">Font Family</span>
+            <select id="fontFamily">
+              <option value="Inter">Inter</option>
+              <option value="Roboto">Roboto</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Arial">Arial</option>
+              <option value="Courier New">Courier New</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Font Size</span>
+            <select id="fontSize">
+              <option value="12">12px</option>
+              <option value="14" selected>14px</option>
+              <option value="15">15px</option>
+              <option value="16">16px</option>
+              <option value="18">18px</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Line Height</span>
+            <select id="lineHeight">
+              <option value="1.4">1.4</option>
+              <option value="1.6" selected>1.6</option>
+              <option value="1.8">1.8</option>
+              <option value="2.0">2.0</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Page Size</span>
+            <select id="pageSize">
+              <option value="a4" selected>A4</option>
+              <option value="letter">Letter</option>
+            </select>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Document Theme</span>
+            <select id="docTheme">
+              <option value="light" selected>Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Column 2: Task Queue Manager -->
+    <main class="dashboard-main glass-card">
+      <div class="queue-header-actions">
+        <div class="queue-meta-title">
+          <h2 class="card-title">📋 Task Queue</h2>
+          <p class="card-desc"><span id="queueCount">0</span> tasks loaded</p>
+        </div>
+        <div class="btn-group-sm">
+          <button class="btn btn-primary btn-sm" id="runQueueBtn" disabled>▶ Run All</button>
+          <button class="btn btn-secondary btn-sm" id="clearCompletedBtn" disabled>🧹 Clear Done</button>
+          <button class="btn btn-ghost btn-sm" id="clearQueueBtn" style="color: var(--accent-rose)" disabled>✕ Clear All</button>
+        </div>
+      </div>
+
+      <!-- Queue Progress bar -->
+      <div class="progress-container" id="globalProgressContainer">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="globalProgressFill"></div>
+        </div>
+        <div class="progress-text">
+          <span id="globalProgressLabel">Queue Idle</span>
+          <span id="globalProgressPercent">0%</span>
+        </div>
+      </div>
+
+      <!-- Task Cards Stack -->
+      <div class="task-list" id="taskList">
+        <div class="empty-state">
+          <span class="empty-icon">📁</span>
+          <p>No video or subtitle tasks loaded.</p>
+          <p class="empty-hint">Drag and drop folder/files to auto-match files.</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- Column 3: WYSIWYG Editor & Export panel -->
+    <section class="dashboard-editor glass-card">
+      <div class="editor-header">
+        <h2 class="card-title">📝 Document Preview & Editor</h2>
+        <p class="card-desc" id="editorSelectedLabel">No task selected</p>
+      </div>
+
+      <!-- Export Panel (Collapsible depending on task selected) -->
+      <div class="dashboard-export-options" id="exportOptionsPanel" style="display:none">
+        <div class="export-mode-selector">
+          <div class="export-card selected" data-format="pdf" id="exportPdfCard">
+            <div class="export-card-icon">📕</div>
+            <div class="export-card-title">PDF</div>
+          </div>
+          <div class="export-card" data-format="docx" id="exportDocxCard">
+            <div class="export-card-icon">📘</div>
+            <div class="export-card-title">DOCX</div>
+          </div>
+        </div>
+
+        <div class="export-filename-row">
+          <input type="text" id="exportFilename" value="tutorial-document" placeholder="Filename">
+          <span id="exportExt">.pdf</span>
+        </div>
+
+        <div class="export-stats-row" id="exportEstimate">
+          <span>Est. Pages: <strong id="estPageCount">--</strong></span>
+          <span>Images: <strong id="estImageCount">--</strong></span>
+        </div>
+
+        <div class="export-actions-grid">
+          <button class="btn btn-primary" id="downloadBtn" style="grid-column: span 2; justify-content: center;">
+            ⬇️ Download Selected Task
+          </button>
+          <button class="btn btn-secondary" id="mergeDownloadBtn" style="font-size:12px; padding: 10px;" title="Merge all selected tasks into a single document">
+            🔗 Merge Selected
+          </button>
+          <button class="btn btn-secondary" id="zipDownloadBtn" style="font-size:12px; padding: 10px;" title="Download all selected tasks in a single ZIP file">
+            📦 ZIP Selected
+          </button>
+        </div>
+
+        <div class="progress-container" id="exportProgress">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="exportProgressFill"></div>
+          </div>
+          <div class="progress-text">
+            <span id="exportProgressLabel">Generating...</span>
+            <span id="exportProgressPercent">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- WYSIWYG Editor -->
+      <div class="editor-container" id="editorWrapper" style="display:none">
+        <div class="editor-toolbar" id="editorToolbar">
+          <button class="toolbar-btn" data-cmd="bold" title="Bold"><b>B</b></button>
+          <button class="toolbar-btn" data-cmd="italic" title="Italic"><i>I</i></button>
+          <button class="toolbar-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+          <div class="toolbar-divider"></div>
+          <select class="toolbar-select" id="toolbarHeading" title="Heading">
+            <option value="p">Normal</option>
+            <option value="h1">Heading 1</option>
+            <option value="h2">Heading 2</option>
+            <option value="h3">Heading 3</option>
+          </select>
+          <div class="toolbar-divider"></div>
+          <button class="toolbar-btn" data-cmd="undo" title="Undo">↩</button>
+          <button class="toolbar-btn" data-cmd="redo" title="Redo">↪</button>
+        </div>
+        <div class="editor-content" id="editorContent" contenteditable="true">
+          <p style="color:#888;text-align:center;margin-top:40px;">Select a completed task to review and edit contents.</p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Hidden video element for frame extraction -->
+<video id="hiddenVideo" style="display:none" preload="auto" crossorigin="anonymous"></video>
+<canvas id="hiddenCanvas" style="display:none"></canvas>
+
+<!-- External Libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<!-- App Modules -->
+<script src="js/utils.js"></script>
+<script src="js/transcript-parser.js"></script>
+<script src="js/video-processor.js"></script>
+<script src="js/document-builder.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/exporter.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
